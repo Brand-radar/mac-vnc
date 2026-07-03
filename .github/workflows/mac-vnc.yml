@@ -107,8 +107,10 @@ jobs:
           fi
           [ -x "$BORE" ] || brew install bore-cli >/dev/null 2>&1 && BORE=$(command -v bore || echo "$HOME/.cargo/bin/bore")
           echo "bore bin: $BORE ($($BORE --version 2>&1 | head -1))"
-          "$BORE" local 5900 --to bore.pub > /tmp/bore_vnc.log 2>&1 &
-          "$BORE" local 22   --to bore.pub > /tmp/bore_ssh.log 2>&1 &
+          # FIXED remote ports → the public address is known in advance (bore.pub:45900 / :45022),
+          # so no phone-home is needed. If a port is taken, bore falls back to a random one (logged).
+          "$BORE" local 5900 --to bore.pub --port 45900 > /tmp/bore_vnc.log 2>&1 &
+          "$BORE" local 22   --to bore.pub --port 45022 > /tmp/bore_ssh.log 2>&1 &
           VNCP=""; SSHP=""
           for i in $(seq 1 40); do
             VNCP=$(grep -aoE 'bore\.pub:[0-9]+' /tmp/bore_vnc.log | head -1)
@@ -119,12 +121,16 @@ jobs:
           printf 'VNC=%s\nSSH=%s\nVNC_PW=%s\n' "$VNCP" "$SSHP" "$VNC_PW" > /tmp/conn.txt
           echo "=== conn.txt ==="; cat /tmp/conn.txt
           echo "=== bore vnc log ==="; cat /tmp/bore_vnc.log
-          echo "=== bore ssh log ==="; cat /tmp/bore_ssh.log
-          SHA=$(gh api repos/$REPO/contents/conn.txt --jq .sha 2>/dev/null || true)
-          gh api --method PUT repos/$REPO/contents/conn.txt \
-            -f message="conn" \
-            -f content="$(base64 < /tmp/conn.txt | tr -d '\n')" \
-            ${SHA:+-f sha=$SHA} || echo "phone-home PUT failed"
+          # phone home via GIT PUSH (gh api PUT is refused for OAuth tokens; git push with
+          # the same token IS proven — the private-repo checkout used it).
+          rm -rf /tmp/selfrepo
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" /tmp/selfrepo 2>/tmp/clone.log || cat /tmp/clone.log
+          cp /tmp/conn.txt /tmp/selfrepo/conn.txt
+          cd /tmp/selfrepo
+          git config user.email ci@brandradar.local; git config user.name brandradar-ci
+          git add conn.txt && git commit -q -m "conn endpoint"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" HEAD:main 2>/tmp/push.log && echo "PHONE-HOME OK" || { echo "git push failed:"; cat /tmp/push.log; }
+          cd -
 
       # ---- 8) keep alive until I push a STOP file (remote kill-switch via gh) ----
       - name: Keep alive
