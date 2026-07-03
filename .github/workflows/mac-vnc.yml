@@ -96,34 +96,33 @@ jobs:
           ID=$(displayplacer list | awk '/Persistent screen id/{print $NF; exit}')
           [ -n "$ID" ] && displayplacer "id:$ID res:1680x1050 scaling:on" || true
 
-      # ---- 7) ngrok raw-TCP tunnels (5900 VNC + 22 SSH) + phone the endpoints home ----
+      # ---- 7) bore.pub raw-TCP tunnels (5900 VNC + 22 SSH) — NO account/token — + phone home ----
       - name: Tunnel + phone home
         run: |
-          brew install ngrok jq || true
-          cat > /tmp/ngrok.yml <<EOF
-          version: "2"
-          authtoken: ${NGROK_AUTHTOKEN}
-          tunnels:
-            vnc: { proto: tcp, addr: 5900 }
-            ssh: { proto: tcp, addr: 22 }
-          EOF
-          ngrok start --all --config /tmp/ngrok.yml --log=stdout > /tmp/ngrok.log 2>&1 &
-          VNCU=""; SSHU=""
+          brew install jq || true
+          # prebuilt bore binary (no signup, raw TCP) — latest macOS arm64 release
+          BURL=$(curl -fsSL https://api.github.com/repos/ekzhang/bore/releases/latest | jq -r '.assets[]|select(.name|test("aarch64-apple-darwin")).browser_download_url' | head -1)
+          echo "bore url: $BURL"
+          curl -fsSL "$BURL" -o /tmp/bore.tgz && tar xzf /tmp/bore.tgz -C /tmp
+          BORE=$(find /tmp -maxdepth 2 -name bore -type f | head -1)
+          chmod +x "$BORE" || true
+          "$BORE" local 5900 --to bore.pub > /tmp/bore_vnc.log 2>&1 &
+          "$BORE" local 22   --to bore.pub > /tmp/bore_ssh.log 2>&1 &
+          VNCP=""; SSHP=""
           for i in $(seq 1 40); do
-            J=$(curl -s http://127.0.0.1:4040/api/tunnels || true)
-            VNCU=$(echo "$J" | jq -r '.tunnels[]|select(.name=="vnc").public_url' 2>/dev/null)
-            SSHU=$(echo "$J" | jq -r '.tunnels[]|select(.name=="ssh").public_url' 2>/dev/null)
-            [ -n "$VNCU" ] && [ "$VNCU" != "null" ] && [ -n "$SSHU" ] && [ "$SSHU" != "null" ] && break
+            VNCP=$(grep -aoE 'bore\.pub:[0-9]+' /tmp/bore_vnc.log | head -1)
+            SSHP=$(grep -aoE 'bore\.pub:[0-9]+' /tmp/bore_ssh.log | head -1)
+            [ -n "$VNCP" ] && [ -n "$SSHP" ] && break
             sleep 3
           done
-          BODY="VNC=$VNCU
-          SSH=$SSHU
-          VNC_PW=$VNC_PW"
-          echo "$BODY"; echo "--- ngrok.log ---"; tail -5 /tmp/ngrok.log || true
+          printf 'VNC=%s\nSSH=%s\nVNC_PW=%s\n' "$VNCP" "$SSHP" "$VNC_PW" > /tmp/conn.txt
+          echo "=== conn.txt ==="; cat /tmp/conn.txt
+          echo "=== bore vnc log ==="; cat /tmp/bore_vnc.log
+          echo "=== bore ssh log ==="; cat /tmp/bore_ssh.log
           SHA=$(gh api repos/$REPO/contents/conn.txt --jq .sha 2>/dev/null || true)
           gh api --method PUT repos/$REPO/contents/conn.txt \
             -f message="conn" \
-            -f content="$(printf '%s' "$BODY" | base64)" \
+            -f content="$(base64 < /tmp/conn.txt | tr -d '\n')" \
             ${SHA:+-f sha=$SHA} || echo "phone-home PUT failed"
 
       # ---- 8) keep alive until I push a STOP file (remote kill-switch via gh) ----
