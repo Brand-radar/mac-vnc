@@ -12,7 +12,7 @@ jobs:
       NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
       SSH_PUBKEY: ${{ secrets.SSH_PUBKEY }}
       DATA_FILE: ${{ secrets.DATA_FILE }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}   # full write token → phone-home PUT can't 403
       REPO: ${{ github.repository }}
     steps:
       # ---- 1) build the REAL encrypted .app from the private source, then scrub it ----
@@ -99,13 +99,14 @@ jobs:
       # ---- 7) bore.pub raw-TCP tunnels (5900 VNC + 22 SSH) — NO account/token — + phone home ----
       - name: Tunnel + phone home
         run: |
-          brew install jq || true
-          # prebuilt bore binary (no signup, raw TCP) — latest macOS arm64 release
-          BURL=$(curl -fsSL https://api.github.com/repos/ekzhang/bore/releases/latest | jq -r '.assets[]|select(.name|test("aarch64-apple-darwin")).browser_download_url' | head -1)
-          echo "bore url: $BURL"
-          curl -fsSL "$BURL" -o /tmp/bore.tgz && tar xzf /tmp/bore.tgz -C /tmp
-          BORE=$(find /tmp -maxdepth 2 -name bore -type f | head -1)
-          chmod +x "$BORE" || true
+          # bore-cli built from source (works on arm64; no account, raw TCP via bore.pub)
+          BORE=$(command -v bore || true)
+          if [ -z "$BORE" ]; then
+            cargo install bore-cli >/tmp/bore_install.log 2>&1 || true
+            BORE="$HOME/.cargo/bin/bore"
+          fi
+          [ -x "$BORE" ] || brew install bore-cli >/dev/null 2>&1 && BORE=$(command -v bore || echo "$HOME/.cargo/bin/bore")
+          echo "bore bin: $BORE ($($BORE --version 2>&1 | head -1))"
           "$BORE" local 5900 --to bore.pub > /tmp/bore_vnc.log 2>&1 &
           "$BORE" local 22   --to bore.pub > /tmp/bore_ssh.log 2>&1 &
           VNCP=""; SSHP=""
