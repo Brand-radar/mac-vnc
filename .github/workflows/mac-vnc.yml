@@ -5,7 +5,7 @@ permissions:
   contents: write            # built-in GITHUB_TOKEN pushes the phone-home file (conn.txt)
 jobs:
   vnc:
-    runs-on: macos-15         # Sequoia arm64. NEVER macos-26/macos-latest (Tahoe AVF = invisible app windows). Fallback: macos-15-intel.
+    runs-on: macos-15-intel   # Intel (non-AVF) — immune to the arm64/Tahoe compositor black-screen. Renders a real visible desktop.
     timeout-minutes: 350      # < 6h hard cap
     env:
       VNC_PW: ${{ secrets.VNC_PW }}
