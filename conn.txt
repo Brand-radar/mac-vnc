@@ -1,0 +1,3 @@
+VNC=bore.pub:45900
+SSH=bore.pub:45022
+VNC_PW=brandrad
