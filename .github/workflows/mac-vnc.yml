@@ -5,7 +5,7 @@ permissions:
   contents: write            # built-in GITHUB_TOKEN pushes the phone-home file (conn.txt)
 jobs:
   vnc:
-    runs-on: macos-15-intel   # Intel (non-AVF) — immune to the arm64/Tahoe compositor black-screen. Renders a real visible desktop.
+    runs-on: macos-15         # Apple Silicon (arm64) — matches the customer's Mac. Black screen was a LOCK, fixed by the never-lock step below.
     timeout-minutes: 350      # < 6h hard cap
     env:
       VNC_PW: ${{ secrets.VNC_PW }}
@@ -62,11 +62,21 @@ jobs:
           open "$HOME/Desktop" || true
           echo "staged Chrome + data file (no app on Desktop; installer zip in ~/Downloads)"
 
-      # ---- 3) keep the console session awake + unlocked ----
-      - name: Keep awake
+      # ---- 3) keep the console session awake + NEVER lock (the arm64 black screen
+      #         was the loginwindow/lock coming to front, not a render bug) ----
+      - name: Keep awake + never lock
         run: |
           caffeinate -disu &
           sudo pmset -a displaysleep 0 sleep 0 disksleep 0 || true
+          # never require a password / never start the screensaver — MUST be the
+          # -currentHost (ByHost) domain, as the runner user (loginwindow ignores the global domain).
+          defaults -currentHost write com.apple.screensaver idleTime -int 0 || true
+          defaults -currentHost write com.apple.screensaver askForPassword -int 0 || true
+          defaults -currentHost write com.apple.screensaver askForPasswordDelay -int 0 || true
+          defaults write com.apple.screensaver idleTime -int 0 || true
+          # kill any screensaver/lock already up, and keep it dead in the background
+          killall ScreenSaverEngine 2>/dev/null || true
+          ( while true; do killall ScreenSaverEngine 2>/dev/null; caffeinate -u -t 5; sleep 25; done ) &
 
       # ---- 4) enable SSH (Remote Login) + install my key (for the residential-IP tunnel) ----
       - name: Enable SSH + authorized key
